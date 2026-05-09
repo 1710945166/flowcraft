@@ -11,27 +11,27 @@ export async function dispatchToAgent(
     .catch(() => null)
   const parentDir = parent?.data?.directory ?? process.cwd()
 
-  const child = await client.session.create({
-    body: {
-      parentID: parentSessionID,
-      title: `flowcraft: ${agentName} - ${task.slice(0, 60)}`,
-    } as Record<string, unknown>,
-    query: { directory: parentDir },
-  })
-  if (!child.data?.id) throw new Error("Failed to create agent session")
-
-  const childID = child.data.id
-
+  // Send a new message to the parent session with a SubtaskPart.
+  // This triggers OpenCode's native subtask mechanism: the server creates
+  // a child session, routes it to the sub-agent, and the TUI shows a
+  // sub-window — same as the built-in `task` tool.
   const response = await client.session.prompt({
-    path: { id: childID },
+    path: { id: parentSessionID },
     body: {
-      parts: [{ type: "text", text: task }],
-      agent: agentName,
-      tools: { task: false, delegate: false },
+      parts: [{
+        type: "subtask",
+        prompt: task,
+        description: `flowcraft: ${agentName}`,
+        agent: agentName,
+      }],
     },
     query: { directory: parentDir },
   })
 
   const parts = response?.data?.parts ?? []
-  return parts.map((p: any) => typeof p === "string" ? p : p.text || "").filter(Boolean).join("\n") || "(no output)"
+  const textParts = parts
+    .filter((p: any) => p.type === "text")
+    .map((p: any) => p.text || "")
+    .filter(Boolean)
+  return textParts.join("\n") || "(no output)"
 }
