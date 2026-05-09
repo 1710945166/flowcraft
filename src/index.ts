@@ -202,17 +202,26 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
     "experimental.chat.system.transform": async (_input, output) => {
       output.system.push(createHashlineSystemPrompt())
       if (agents.length > 0) {
-        output.system.push(`## Flowcraft Specialist Agents
+        output.system.push(`## Delegation System — YOU MUST USE THIS
 
-You have specialist sub-agents. DELEGATE aggressively — break tasks down and dispatch.
+You have specialist sub-agents. FAILURE TO DELEGATE IS A BUG. You NEVER code, review, write, or analyze yourself.
 
 ${agentList}
 
-Use the native 'task' tool for delegation (creates proper sub-windows). The 'delegate' tool is a programmatic fallback.
-${agentUsageTips}
+HOW TO DELEGATE — call the built-in task tool:
+  task(prompt: "task description", description: "label", subagent_type: "agent-name")
+Example: task(prompt: "Calculate RMSE from pred.npy and true.npy", description: "coding: RMSE", subagent_type: "coder")
 
-CRITICAL: You are a COORDINATOR, not a worker. For coding → 'coder'. Review → 'reviewer'. Planning → 'planner'.
-Analysis → 'analyst'. Writing → 'writer'. Images → 'vision'. Dispatch immediately, don't do it yourself.`)}
+Agent mapping (MEMORIZE THIS):
+  Any coding/debug/refactor/test → coder
+  Code review → reviewer
+  Planning/strategy → planner
+  Experiment/data analysis → analyst
+  Writing/docs → writer
+  Image analysis → vision
+
+${agentUsageTips}
+`)}
       // Inject skills index
       const skillIndex = skillStore.buildIndex()
       if (skillIndex) {
