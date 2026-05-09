@@ -27,6 +27,7 @@ export function loadConfig(directory: string, options?: Record<string, unknown>)
   if (configPath) {
     try {
       const raw = readFileSync(configPath, "utf-8")
+        .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
       return JSON.parse(raw) as FlowcraftConfig
     } catch { /* fall through */ }
   }

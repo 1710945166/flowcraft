@@ -11,6 +11,7 @@ import { join } from "node:path"
 import { homedir } from "node:os"
 
 let currentSessionID = ""
+let currentToolName = ""
 const skillStore = new SkillStore({ projectRoot: process.cwd() })
 
 function loadDMXKey(): string | null {
@@ -105,6 +106,11 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
               }),
             })
 
+            if (!res.ok) {
+              const errText = await res.text()
+              return `Error: API returned ${res.status}: ${errText.slice(0, 200)}`
+            }
+
             const data = await res.json() as any
             return data?.choices?.[0]?.message?.content || "No analysis returned."
           } catch (err) {
@@ -181,6 +187,7 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
 
     "tool.execute.before": async (input) => {
       currentSessionID = input.sessionID
+      currentToolName = input.tool
     },
 
     "chat.message": async (_input, output) => {
@@ -201,7 +208,7 @@ You have specialist sub-agents. DELEGATE aggressively — break tasks down and d
 
 ${agentList}
 
-Use the delegate tool. It returns the full response.
+Use the native 'task' tool for delegation (creates proper sub-windows). The 'delegate' tool is a programmatic fallback.
 ${agentUsageTips}
 
 CRITICAL: You are a COORDINATOR, not a worker. For coding → 'coder'. Review → 'reviewer'. Planning → 'planner'.

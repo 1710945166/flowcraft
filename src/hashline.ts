@@ -3,7 +3,7 @@ import { createHash } from "node:crypto"
 import type { ToolResult } from "@opencode-ai/plugin"
 
 function lineHash(content: string): string {
-  return createHash("sha256").update(content).digest("base64url").slice(0, 4)
+  return createHash("sha256").update(content).digest("base64url").slice(0, 6)
 }
 
 export function annotateWithHash(text: string): string {
@@ -29,35 +29,39 @@ export interface HashlineEditInput {
 }
 
 export function applyHashlineEdits(input: HashlineEditInput): ToolResult {
-  const content = readFileSync(input.filePath, "utf-8")
-  const lines = content.split("\n")
-  const failed: Array<{ line: number; expected: string; actual: string }> = []
+  try {
+    const content = readFileSync(input.filePath, "utf-8").replace(/\r\n/g, "\n")
+    const lines = content.split("\n")
+    const failed: Array<{ line: number; expected: string; actual: string }> = []
 
-  for (const edit of input.edits) {
-    if (edit.line < 1 || edit.line > lines.length) {
-      failed.push({ line: edit.line, expected: edit.hash, actual: "(out of range)" })
-      continue
+    for (const edit of input.edits) {
+      if (edit.line < 1 || edit.line > lines.length) {
+        failed.push({ line: edit.line, expected: edit.hash, actual: "(out of range)" })
+        continue
+      }
+      const actualLine = lines[edit.line - 1]
+      const actualHash = lineHash(actualLine)
+      if (actualHash !== edit.hash) {
+        failed.push({ line: edit.line, expected: edit.hash, actual: actualHash })
+      }
     }
-    const actualLine = lines[edit.line - 1]
-    const actualHash = lineHash(actualLine)
-    if (actualHash !== edit.hash) {
-      failed.push({ line: edit.line, expected: edit.hash, actual: actualHash })
+
+    if (failed.length > 0) {
+      const details = failed
+        .map((f) => `  Line ${f.line}: expected hash ${f.expected}, got ${f.actual}`)
+        .join("\n")
+      return `Hash verification failed for ${failed.length} line(s). File has changed since read.\n${details}\nRe-read the file and retry.`
     }
-  }
 
-  if (failed.length > 0) {
-    const details = failed
-      .map((f) => `  Line ${f.line}: expected hash ${f.expected}, got ${f.actual}`)
-      .join("\n")
-    return `Hash verification failed for ${failed.length} line(s). File has changed since read.\n${details}\nRe-read the file and retry.`
-  }
+    for (const edit of input.edits) {
+      lines[edit.line - 1] = edit.newContent
+    }
 
-  for (const edit of input.edits) {
-    lines[edit.line - 1] = edit.newContent
+    writeFileSync(input.filePath, lines.join("\n"), "utf-8")
+    return `Applied ${input.edits.length} hash-verified edit(s) to ${input.filePath}.`
+  } catch (err) {
+    return `Error editing file: ${err instanceof Error ? err.message : String(err)}`
   }
-
-  writeFileSync(input.filePath, lines.join("\n"), "utf-8")
-  return `Applied ${input.edits.length} hash-verified edit(s) to ${input.filePath}.`
 }
 
 export function readWithHash(filePath: string): ToolResult {
