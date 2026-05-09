@@ -50,10 +50,21 @@ export interface AgentInfo {
   mode?: string
 }
 
+const DEFAULT_AGENTS: AgentInfo[] = [
+  { name: "planner",  description: "Strategic planner - analyzes and plans complex tasks",          model: "opencode-go/deepseek-v4-flash", mode: "subagent" },
+  { name: "coder",    description: "Implementation specialist - writes clean code",                  model: "opencode-go/deepseek-v4-flash", mode: "subagent" },
+  { name: "reviewer", description: "Code reviewer - catches bugs and quality issues",              model: "opencode-go/deepseek-v4-flash", mode: "subagent" },
+  { name: "writer",   description: "Writing specialist - generates high-quality prose and docs",    model: "opencode-go/deepseek-v4-flash", mode: "subagent" },
+  { name: "analyst",  description: "Data and experiment analysis specialist - analyzes metrics",    model: "opencode-go/deepseek-v4-flash", mode: "subagent" },
+  { name: "vision",   description: "Visual analysis specialist - analyzes images and screenshots", model: "dmx/doubao-seed-2-0-lite-260215", mode: "subagent" },
+]
+
 export function readOpencodeAgents(): AgentInfo[] {
   const candidates = [
     join(process.cwd(), ".opencode", "opencode.jsonc"),
+    join(process.cwd(), ".opencode", "opencode.json"),
     join(homedir(), ".config", "opencode", "opencode.jsonc"),
+    join(homedir(), ".config", "opencode", "opencode.json"),
   ]
   for (const p of candidates) {
     if (!existsSync(p)) continue
@@ -72,5 +83,5 @@ export function readOpencodeAgents(): AgentInfo[] {
         }))
     } catch { /* next */ }
   }
-  return []
+  return DEFAULT_AGENTS
 }
