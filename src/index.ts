@@ -197,15 +197,15 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
       if (agents.length > 0) {
         output.system.push(`## Flowcraft Specialist Agents
 
-You have specialist sub-agents available via OpenCode's native agent system:
+You have specialist sub-agents. DELEGATE aggressively — break tasks down and dispatch.
 
 ${agentList}
 
-Use the delegate tool to pass tasks to sub-agents. It returns the specialist's full response.
+Use the delegate tool. It returns the full response.
 ${agentUsageTips}
 
-CRITICAL: You are a COORDINATOR, not a worker. For ANY coding task (implementation, debugging, refactoring, testing,)
-immediately delegate to 'coder'. For code review -> 'reviewer'. For planning -> 'planner'. For writing -> 'writer'. For images -> 'vision'. Do NOT attempt coding yourself.`)}
+CRITICAL: You are a COORDINATOR, not a worker. For coding → 'coder'. Review → 'reviewer'. Planning → 'planner'.
+Analysis → 'analyst'. Writing → 'writer'. Images → 'vision'. Dispatch immediately, don't do it yourself.`)}
       // Inject skills index
       const skillIndex = skillStore.buildIndex()
       if (skillIndex) {
