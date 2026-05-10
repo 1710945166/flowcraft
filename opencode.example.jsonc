@@ -1,0 +1,137 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // ========== Plugin ==========
+  "plugin": [
+    // Windows: "C:\\Users\\你的用户名\\.config\\opencode\\plugins\\flowcraft.js"
+    // Linux:   "~/.config/opencode/plugins/flowcraft.js"
+    "~/.config/opencode/plugins/flowcraft.js"
+  ],
+
+  // ========== Provider ==========
+  "provider": {
+    // DMX API (DeepSeek / Doubao models via DMX proxy)
+    "dmx": {
+      "name": "DMX_CN",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://www.dmxapi.cn/v1",
+        "apiKey": "your_api_key_here"
+      },
+      "models": {
+        "doubao-seed-2-0-lite-260215": {
+          "name": "Doubao Seed 2 Lite",
+          "reasoning": true,
+          "limit": { "context": 256000, "output": 32000 },
+          "modalities": { "input": ["text", "image"], "output": ["text"] },
+          "cost": { "input": 0.6, "output": 3.6 },
+          "options": { "reasoningEffort": "high", "thinking": { "type": "enabled" } }
+        },
+        "deepseek-v4-pro-guan": {
+          "name": "DeepSeek V4 Pro 官转",
+          "reasoning": true,
+          "limit": { "context": 1000000, "output": 384000 },
+          "modalities": { "input": ["text"], "output": ["text"] },
+          "interleaved": { "field": "reasoning_content" },
+          "cost": { "input": 3, "output": 6, "cacheRead": 0.025 },
+          "options": { "reasoningEffort": "max", "thinking": { "type": "enabled" } }
+        },
+        "deepseek-v4-pro": {
+          "name": "DeepSeek V4 Pro",
+          "reasoning": true,
+          "limit": { "context": 1000000, "output": 384000 },
+          "modalities": { "input": ["text"], "output": ["text"] },
+          "interleaved": { "field": "reasoning_content" },
+          "cost": { "input": 12, "output": 24, "cacheRead": 0.1 },
+          "options": { "reasoningEffort": "max", "thinking": { "type": "enabled" } }
+        },
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash",
+          "reasoning": true,
+          "limit": { "context": 1000000, "output": 384000 },
+          "modalities": { "input": ["text"], "output": ["text"] },
+          "interleaved": { "field": "reasoning_content" },
+          "cost": { "input": 1, "output": 2, "cacheRead": 0.02 },
+          "options": { "reasoningEffort": "max", "thinking": { "type": "enabled" } }
+        }
+      }
+    }
+  },
+
+  // ========== MCP Servers（可选）==========
+  "mcp": {
+    // 示例：智谱 MCP 工具（需替换 API key）
+    // "zai-mcp-server": {
+    //   "type": "local",
+    //   "command": ["npx", "-y", "@z_ai/mcp-server@latest"],
+    //   "environment": {
+    //     "Z_AI_API_KEY": "your_api_key_here",
+    //     "Z_AI_MODE": "ZHIPU"
+    //   },
+    //   "enabled": true
+    // }
+  },
+
+  // ========== Agent 定义 ==========
+  "agent": {
+    // --- Orchestrator (由项目内 .opencode/opencode.jsonc 覆盖 mode: primary) ---
+    // 此处仅定义基础配置，实际 primary 模式和工具限制在项目级配置中设置
+    "orchestrator": {
+      "model": "dmx/deepseek-v4-flash",
+      "mode": "primary",
+      "description": "Main orchestrator - task decomposition and coordination",
+      "prompt": "You are the orchestrator — the coordination hub. Your ONLY job is to decompose tasks, delegate to specialists, and synthesize their results.\n\nCRITICAL — YOUR TOOL ACCESS IS STRICTLY LIMITED to: delegate, read, glob, grep, flowcraft_status. You CANNOT write, edit, run bash, use webfetch, use read_with_hash, hashline_edit, analyze_image, run_skill, or any MCP tools. If you cannot delegate something, you CANNOT do it. Period.\n\nHARD RULES:\n1. The MOMENT you see a task, ask: \"Which specialist should I send this to?\" If uncertain, default to `planner`.\n2. ALWAYS use the `delegate` tool to pass work to sub-agents:\n   - coding, debugging, refactoring, testing → `coder`\n   - code review → `reviewer`\n   - planning, analysis, strategy → `planner`\n   - experiment/data analysis, metrics → `analyst`\n   - writing, documentation, reports → `writer`\n   - image analysis → `vision`\n3. BREAK DOWN complex requests into subtasks and dispatch sequentially or in parallel.\n4. After every meaningful change, tell the agent to git add + git commit with a descriptive message (prefixes: add: refactor: fix: chore:).",
+      "permission": { "read": "allow", "glob": "allow", "grep": "allow", "todowrite": "allow", "edit": "deny", "bash": "deny", "webfetch": "deny", "doom_loop": "deny", "external_directory": "deny" }
+    },
+
+    // --- Sub-agents（flowcraft 用 delegate 调度）---
+    "planner": {
+      "model": "dmx/deepseek-v4-flash",
+      "mode": "subagent",
+      "description": "Strategic planner - analyzes and plans complex tasks",
+      "prompt": "You are a strategic planner. Analyze the task, break it down into clear steps, identify potential issues, and create a plan before any code is written. Be thorough and consider edge cases.",
+      "tools": { "task": false, "delegate": false },
+      "permission": { "edit": "deny", "bash": "deny", "webfetch": "allow", "doom_loop": "deny", "external_directory": "deny" }
+    },
+    "coder": {
+      "model": "dmx/deepseek-v4-flash",
+      "mode": "subagent",
+      "description": "Implementation specialist - writes clean code",
+      "prompt": "You are a focused implementation specialist. Write clean, correct code. Read relevant files first. Follow existing style. Do not add comments unless the codebase uses them.",
+      "tools": { "task": false, "delegate": false },
+      "permission": { "edit": "allow", "bash": "allow", "webfetch": "allow", "doom_loop": "ask", "external_directory": "allow" }
+    },
+    "reviewer": {
+      "model": "dmx/deepseek-v4-flash",
+      "mode": "subagent",
+      "description": "Code reviewer - catches bugs and quality issues",
+      "prompt": "You are a meticulous code reviewer. Catch bugs, check edge cases, verify error handling. Suggest concrete improvements.",
+      "tools": { "task": false, "delegate": false },
+      "permission": { "edit": "deny", "bash": "deny", "webfetch": "allow", "doom_loop": "deny", "external_directory": "deny" }
+    },
+    "writer": {
+      "model": "dmx/deepseek-v4-pro-guan",
+      "mode": "subagent",
+      "description": "Writing specialist - generates high-quality prose, documentation, and reports",
+      "prompt": "You are a skilled writing specialist. Generate clear, well-structured, and engaging content. Focus on accuracy, clarity, and appropriate tone for the audience. Revise and polish until the writing is publication-ready.",
+      "tools": { "task": false, "delegate": false },
+      "permission": { "edit": "allow", "bash": "deny", "webfetch": "allow", "doom_loop": "deny", "external_directory": "deny" }
+    },
+    "analyst": {
+      "model": "dmx/deepseek-v4-flash",
+      "mode": "subagent",
+      "description": "Data and experiment analysis specialist - analyzes experiment results, metrics, logs, and research data",
+      "prompt": "You are an analysis specialist. Your job is to read and interpret experiment data, metrics, logs, and research results. You identify trends, anomalies, correlations, and actionable insights. You present findings clearly with quantitative evidence. You do NOT write code or modify files — you analyze what already exists.",
+      "tools": { "task": false, "delegate": false },
+      "permission": { "edit": "deny", "bash": "deny", "webfetch": "allow", "doom_loop": "deny", "external_directory": "deny" }
+    },
+    "vision": {
+      "model": "dmx/doubao-seed-2-0-lite-260215",
+      "mode": "subagent",
+      "description": "Visual analysis specialist - analyzes images and screenshots",
+      "prompt": "You are a visual analysis specialist. Analyze images, screenshots, and visual content in detail. Describe what you see, identify elements, and provide insights.",
+      "tools": { "task": false, "delegate": false },
+      "permission": { "edit": "deny", "bash": "deny", "webfetch": "deny", "doom_loop": "deny", "external_directory": "deny" }
+    }
+  }
+}
