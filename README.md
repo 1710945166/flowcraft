@@ -15,7 +15,7 @@ Multi-agent orchestration plugin for [OpenCode](https://opencode.ai). Delegate t
 
 ```bash
 # Clone the repo
-git clone https://github.com/1710945166/flowcraft.git
+git clone https://github.com/J1I1E/flowcraft.git
 cd flowcraft
 
 # Install dependencies
@@ -34,7 +34,7 @@ Or add it as a git dependency in your OpenCode config:
 // ~/.config/opencode/opencode.jsonc
 {
   "plugin": [
-    "github:1710945166/flowcraft"
+    "github:J1I1E/flowcraft"
   ]
 }
 ```

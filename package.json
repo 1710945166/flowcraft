@@ -21,11 +21,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/1710945166/flowcraft.git"
+    "url": "git+https://github.com/J1I1E/flowcraft.git"
   },
-  "homepage": "https://github.com/1710945166/flowcraft#readme",
+  "homepage": "https://github.com/J1I1E/flowcraft#readme",
   "bugs": {
-    "url": "https://github.com/1710945166/flowcraft/issues"
+    "url": "https://github.com/J1I1E/flowcraft/issues"
   },
   "dependencies": {
     "@opencode-ai/plugin": "^1.4.0",
