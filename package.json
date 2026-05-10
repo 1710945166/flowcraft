@@ -1,6 +1,6 @@
 {
   "name": "flowcraft",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "Multi-agent orchestration plugin for OpenCode — delegate tasks to specialist sub-agents, load Skills, manage MCP servers",
   "type": "module",
   "main": "dist/bundle.js",

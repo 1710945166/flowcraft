@@ -1,3 +1,33 @@
+# v0.2.1 — 2026-05-10
+
+## English
+
+### Added
+- `flowcraft.config.json` — orchestrator tool permission white-list configuration
+- `AGENTS.md` key decisions documentation
+
+### Fixed
+- Orchestrator can no longer call `hashline_edit` directly — physically blocked by OpenCode permission system (`deny`)
+- `read_with_hash` preserved as read-only tool for orchestrator
+
+### Changed
+- All file edits must now go through: `coder → reviewer → commit` workflow
+
+## 中文
+
+### 新增
+- `flowcraft.config.json` — orchestrator 工具权限白名单配置
+- `AGENTS.md` 关键决策文档记录
+
+### 修复
+- Orchestrator 无法再直接调用 `hashline_edit` — 通过 OpenCode permission 系统物理拦截
+- `read_with_hash` 保留为 orchestrator 只读工具
+
+### 变更
+- 所有文件修改必须走 `coder → reviewer → commit` 流程
+
+---
+
 ## v0.2.0
 
 ### 🆕 新增
