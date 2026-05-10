@@ -12776,7 +12776,7 @@ async function dispatchToAgent(client, parentSessionID, agentName, task) {
     },
     query: { directory: parentDir }
   });
-  const waitForIdle = async () => {
+  const waitForIdle = async (childId) => {
     for (let i = 0; i < 120; i++) {
       await new Promise((r) => setTimeout(r, 1e3));
       const statusRes = await client.session.status({
@@ -12784,10 +12784,11 @@ async function dispatchToAgent(client, parentSessionID, agentName, task) {
       }).catch(() => null);
       const statuses = statusRes?.data ?? {};
       const myStatus = statuses[childID];
-      if (!myStatus || myStatus.type === "idle") return;
+      if (!myStatus || myStatus.type === "idle") return true;
     }
+    return false;
   };
-  await waitForIdle();
+  await waitForIdle(childID);
   const elapsed = ((Date.now() - startTime) / 1e3).toFixed(1);
   const msgRes = await client.session.messages({
     path: { id: childID },
@@ -13158,6 +13159,14 @@ var flowcraft = async ({ client, directory }, options) => {
           task: tool.schema.string().describe("Detailed task description")
         },
         async execute(args) {
+          try {
+            const session = await client.session.get({ path: { id: currentSessionID } });
+            const sessionAgent = session?.data?.agent;
+            if (sessionAgent && sessionAgent !== "orchestrator") {
+              return `Error: delegate is not available from sub-agent "${sessionAgent}". Only the orchestrator can delegate.`;
+            }
+          } catch {
+          }
           const agent = agents.find((a) => a.name === args.agent);
           if (!agent) {
             return `Unknown agent "${args.agent}". Available: ${agentNames}`;
@@ -13189,6 +13198,14 @@ var flowcraft = async ({ client, directory }, options) => {
           })).describe("Tasks to run in parallel (2-5 tasks)")
         },
         async execute(args) {
+          try {
+            const session = await client.session.get({ path: { id: currentSessionID } });
+            const sessionAgent = session?.data?.agent;
+            if (sessionAgent && sessionAgent !== "orchestrator") {
+              return `Error: delegate_batch is not available from sub-agent "${sessionAgent}". Only the orchestrator can delegate.`;
+            }
+          } catch {
+          }
           const unknown2 = args.tasks.find((t) => !agents.find((a) => a.name === t.agent));
           if (unknown2) return `Unknown agent "${unknown2.agent}". Available: ${agentNames}`;
           if (!currentSessionID) return "Error: no active session ID";
@@ -13258,7 +13275,20 @@ ${skill.body}`;
         msg.model = { providerID: "dmx", modelID: "doubao-seed-2-0-lite-260215" };
       }
     },
-    "experimental.chat.system.transform": async (_input, output) => {
+    "experimental.chat.system.transform": async (input, output) => {
+      if (!input.sessionID) {
+        output.system.push(createHashlineSystemPrompt());
+        return;
+      }
+      try {
+        const session = await client.session.get({ path: { id: input.sessionID } });
+        const sessionData = session?.data;
+        if (sessionData?.agent && sessionData?.agent !== "orchestrator") {
+          output.system.push(createHashlineSystemPrompt());
+          return;
+        }
+      } catch {
+      }
       output.system.push(createHashlineSystemPrompt());
       if (agents.length > 0) {
         const orch = projectConfig.orchestrator;
@@ -13267,10 +13297,6 @@ ${skill.body}`;
 ${orch.extraPrompt}
 ` : "";
         output.system.push(`## Delegation System \u2014 YOU MUST USE THIS
-
-${extraPromptSection}You are the ORCHESTRATOR, not a worker. Your tool access is STRICTLY LIMITED to: ${allowedToolsStr}. You CANNOT use write, edit, bash, webfetch, read_with_hash, hashline_edit, analyze_image, run_skill, or any MCP tools. If you need these \u2014 DELEGATE. You NEVER code, review, write, or analyze yourself. FAILURE TO DELEGATE IS A BUG.
-
-${agentList}
 
 HOW TO DELEGATE \u2014 use the delegate tool:
   delegate(agent: "agent-name", task: "detailed task description")

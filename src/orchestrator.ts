@@ -35,7 +35,7 @@ export async function dispatchToAgent(
     query: { directory: parentDir },
   })
 
-  const waitForIdle = async (): Promise<void> => {
+  const waitForIdle = async (childId: string): Promise<boolean> => {
     for (let i = 0; i < 120; i++) {
       await new Promise(r => setTimeout(r, 1000))
       const statusRes = await client.session.status({
@@ -43,10 +43,12 @@ export async function dispatchToAgent(
       }).catch(() => null)
       const statuses = statusRes?.data ?? {}
       const myStatus = (statuses as Record<string, { type: string }>)[childID]
-      if (!myStatus || myStatus.type === "idle") return
+      if (!myStatus || myStatus.type === "idle") return true
     }
+    // 超时：记录日志返回 false
+    return false
   }
-  await waitForIdle()
+  await waitForIdle(childID)
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
 

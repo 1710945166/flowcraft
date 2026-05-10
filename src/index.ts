@@ -136,6 +136,14 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
           task: tool.schema.string().describe("Detailed task description"),
         },
         async execute(args: { agent: string; task: string }): Promise<ToolResult> {
+          // ★ 检查调用者身份
+          try {
+            const session = await client.session.get({ path: { id: currentSessionID } })
+            const sessionAgent = (session?.data as any)?.agent
+            if (sessionAgent && sessionAgent !== "orchestrator") {
+              return `Error: delegate is not available from sub-agent "${sessionAgent}". Only the orchestrator can delegate.`
+            }
+          } catch { /* fall through */ }
           const agent = agents.find(a => a.name === args.agent)
           if (!agent) {
             return `Unknown agent "${args.agent}". Available: ${agentNames}`
@@ -167,6 +175,14 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
           })).describe("Tasks to run in parallel (2-5 tasks)"),
         },
         async execute(args: { tasks: Array<{ agent: string; task: string; files?: string[] }> }): Promise<ToolResult> {
+          // ★ 检查调用者身份
+          try {
+            const session = await client.session.get({ path: { id: currentSessionID } })
+            const sessionAgent = (session?.data as any)?.agent
+            if (sessionAgent && sessionAgent !== "orchestrator") {
+              return `Error: delegate_batch is not available from sub-agent "${sessionAgent}". Only the orchestrator can delegate.`
+            }
+          } catch { /* fall through */ }
           const unknown = args.tasks.find(t => !agents.find(a => a.name === t.agent))
           if (unknown) return `Unknown agent "${unknown.agent}". Available: ${agentNames}`
           if (!currentSessionID) return "Error: no active session ID"
@@ -233,7 +249,23 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
       }
     },
 
-    "experimental.chat.system.transform": async (_input, output) => {
+    "experimental.chat.system.transform": async (input, output) => {
+      // 检查当前 session 是否是子 session（非 orchestrator）
+      if (!input.sessionID) {
+        output.system.push(createHashlineSystemPrompt())
+        return
+      }
+      try {
+        const session = await client.session.get({ path: { id: input.sessionID } })
+        const sessionData = session?.data as any
+        // 如果有 agent 字段且不是 orchestrator，跳过 delegation 注入
+        if (sessionData?.agent && sessionData?.agent !== "orchestrator") {
+          // 只注入 hashline 提示，不注入 delegation
+          output.system.push(createHashlineSystemPrompt())
+          return
+        }
+      } catch { /* fall through */ }
+
       output.system.push(createHashlineSystemPrompt())
       if (agents.length > 0) {
         const orch = projectConfig.orchestrator
@@ -244,10 +276,6 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
           ? `\n${orch.extraPrompt}\n`
           : ""
         output.system.push(`## Delegation System — YOU MUST USE THIS
-
-${extraPromptSection}You are the ORCHESTRATOR, not a worker. Your tool access is STRICTLY LIMITED to: ${allowedToolsStr}. You CANNOT use write, edit, bash, webfetch, read_with_hash, hashline_edit, analyze_image, run_skill, or any MCP tools. If you need these — DELEGATE. You NEVER code, review, write, or analyze yourself. FAILURE TO DELEGATE IS A BUG.
-
-${agentList}
 
 HOW TO DELEGATE — use the delegate tool:
   delegate(agent: "agent-name", task: "detailed task description")
