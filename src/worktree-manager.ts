@@ -38,7 +38,7 @@ export class WorktreeManager {
 
     if (existsSync(worktreePath)) {
       try {
-        execSync(`git worktree remove "${worktreePath}" --force 2>nul`, {
+        execSync(`git worktree remove "${worktreePath}" --force`, {
           cwd: this.repoPath, stdio: "pipe", timeout: 10000,
         })
       } catch { /* ignore */ }
@@ -104,7 +104,7 @@ export class WorktreeManager {
 
   async cleanup(worktree: WorktreeInfo): Promise<void> {
     try {
-      execSync(`git worktree remove "${worktree.path}" --force 2>nul`, {
+      execSync(`git worktree remove "${worktree.path}" --force`, {
         cwd: this.repoPath, stdio: "pipe", timeout: 15000,
       })
     } catch { /* ignore */ }
@@ -122,7 +122,7 @@ export class WorktreeManager {
         const parts = line.trim().split(/\s+/)
         if (parts.length >= 1 && parts[0].includes("flowcraft-wt")) {
           try {
-            execSync(`git worktree remove "${parts[0]}" --force 2>nul`, {
+            execSync(`git worktree remove "${parts[0]}" --force`, {
               cwd: this.repoPath, stdio: "pipe", timeout: 15000,
             })
           } catch { /* ignore */ }
