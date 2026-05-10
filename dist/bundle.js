@@ -12644,7 +12644,7 @@ var WorktreeManager = class {
     }
     if (existsSync2(worktreePath)) {
       try {
-        execSync(`git worktree remove "${worktreePath}" --force 2>nul`, {
+        execSync(`git worktree remove "${worktreePath}" --force`, {
           cwd: this.repoPath,
           stdio: "pipe",
           timeout: 1e4
@@ -12716,7 +12716,7 @@ var WorktreeManager = class {
   }
   async cleanup(worktree) {
     try {
-      execSync(`git worktree remove "${worktree.path}" --force 2>nul`, {
+      execSync(`git worktree remove "${worktree.path}" --force`, {
         cwd: this.repoPath,
         stdio: "pipe",
         timeout: 15e3
@@ -12739,7 +12739,7 @@ var WorktreeManager = class {
         const parts = line.trim().split(/\s+/);
         if (parts.length >= 1 && parts[0].includes("flowcraft-wt")) {
           try {
-            execSync(`git worktree remove "${parts[0]}" --force 2>nul`, {
+            execSync(`git worktree remove "${parts[0]}" --force`, {
               cwd: this.repoPath,
               stdio: "pipe",
               timeout: 15e3
@@ -13078,6 +13078,11 @@ var flowcraft = async ({ client, directory }, options) => {
           filePath: tool.schema.string().describe("Absolute path to the file to read")
         },
         async execute(args) {
+          const session = await client.session.get({ path: { id: currentSessionID } });
+          const sessionData = session?.data;
+          if (sessionData?.agent === "orchestrator") {
+            return { output: "Error: read_with_hash is not available for orchestrator. Use read instead." };
+          }
           return readWithHash(args.filePath);
         }
       }),
@@ -13092,6 +13097,11 @@ var flowcraft = async ({ client, directory }, options) => {
           })).describe("Array of edits - all verified before any are written")
         },
         async execute(args) {
+          const session = await client.session.get({ path: { id: currentSessionID } });
+          const sessionData = session?.data;
+          if (sessionData?.agent === "orchestrator") {
+            return { output: "Error: hashline_edit is not available for orchestrator. Delegate to coder instead." };
+          }
           return applyHashlineEdits(args);
         }
       }),

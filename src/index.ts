@@ -50,6 +50,11 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
           filePath: tool.schema.string().describe("Absolute path to the file to read"),
         },
         async execute(args: { filePath: string }): Promise<ToolResult> {
+          const session = await client.session.get({ path: { id: currentSessionID } })
+          const sessionData = session?.data as any
+          if (sessionData?.agent === "orchestrator") {
+            return { output: "Error: read_with_hash is not available for orchestrator. Use read instead." }
+          }
           return readWithHash(args.filePath)
         },
       }),
@@ -65,6 +70,11 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
           })).describe("Array of edits - all verified before any are written"),
         },
         async execute(args: HashlineEditInput): Promise<ToolResult> {
+          const session = await client.session.get({ path: { id: currentSessionID } })
+          const sessionData = session?.data as any
+          if (sessionData?.agent === "orchestrator") {
+            return { output: "Error: hashline_edit is not available for orchestrator. Delegate to coder instead." }
+          }
           return applyHashlineEdits(args)
         },
       }),
