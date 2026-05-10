@@ -1,4 +1,6 @@
 import type { OpencodeClient } from "@opencode-ai/sdk"
+import { WorktreeManager } from "./worktree-manager.js"
+import type { WorktreeInfo } from "./worktree-manager.js"
 
 export async function dispatchToAgent(
   client: OpencodeClient,
@@ -90,8 +92,16 @@ export async function dispatchBatch(
   client: OpencodeClient,
   parentSessionID: string,
   tasks: BatchTask[],
-  options?: { maxWait?: number }
+  options?: { maxWait?: number; useWorktree?: boolean }
 ): Promise<string> {
+  const useWorktree = options?.useWorktree ?? false
+  let wtManager: WorktreeManager | null = null
+  const worktreeMap = new Map<string, WorktreeInfo>()
+
+  if (useWorktree) {
+    wtManager = new WorktreeManager(process.cwd())
+    wtManager.setSharedDirs(["DiC-SR", "DiC-main", "DiC_SR_DATA"])
+  }
   const parent = await client.session
     .get({ path: { id: parentSessionID } })
     .catch(() => null)
@@ -99,14 +109,20 @@ export async function dispatchBatch(
   const maxWait = (options?.maxWait ?? 120) * 1000
   const startTime = Date.now()
 
-  // Phase 1: create all child sessions in parallel
+  // Phase 1: create all child sessions in parallel (optionally with worktrees)
   const sessionPromises = tasks.map(async (t, i) => {
+    let sessionDir = parentDir
+    if (wtManager) {
+      const wt = await wtManager.create(t.agent, t.task)
+      worktreeMap.set(t.agent, wt)
+      sessionDir = wt.path
+    }
     const child = await client.session.create({
       body: {
         parentID: parentSessionID,
         title: `flowcraft-batch: ${t.agent} - ${t.task.slice(0, 60)}`,
       } as Record<string, unknown>,
-      query: { directory: parentDir },
+      query: { directory: sessionDir },
     })
     if (!child.data?.id) throw new Error(`Failed to create session for ${t.agent}`)
     return { id: child.data.id, agent: t.agent, task: t.task, index: i }
@@ -142,6 +158,13 @@ export async function dispatchBatch(
 
   const totalElapsed = ((Date.now() - startTime) / 1000).toFixed(1)
 
+  // Phase 5: format output
+  const lines: string[] = [
+    `━━━ Batch: ${tasks.length} tasks in parallel ━━━`,
+    `⏱ Total elapsed: ${totalElapsed}s`,
+    ``,
+  ]
+
   // Phase 4: collect results in parallel (allSettled prevents single failure from blocking)
   const results = await Promise.allSettled(children.map(async (c) => {
     const cStart = Date.now()
@@ -166,12 +189,20 @@ export async function dispatchBatch(
     } as BatchResult
   }))
 
-  // Phase 5: format output
-  const lines: string[] = [
-    `━━━ Batch: ${tasks.length} tasks in parallel ━━━`,
-    `⏱ Total elapsed: ${totalElapsed}s`,
-    ``,
-  ]
+  // Phase 4.5: merge worktrees back if enabled
+  if (wtManager) {
+    for (const c of children) {
+      const wt = worktreeMap.get(c.agent)
+      if (!wt) continue
+      if (!wtManager.isClean(wt)) {
+        const mergeResult = wtManager.merge(wt)
+        if (!mergeResult.success) {
+          lines.push(`[⚠] Worktree merge failed for ${c.agent}: ${mergeResult.message}`)
+        }
+      }
+      await wtManager.cleanup(wt)
+    }
+  }
 
   results.forEach((r, i) => {
     const c = children[i]
