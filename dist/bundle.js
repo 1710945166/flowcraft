@@ -12619,6 +12619,139 @@ function createTodoEnforcer(client) {
   };
 }
 
+// src/worktree-manager.ts
+import { execSync } from "node:child_process";
+import { existsSync as existsSync2, mkdirSync, symlinkSync, rmSync } from "node:fs";
+import { join as join2, resolve } from "node:path";
+var WorktreeManager = class {
+  repoPath;
+  baseDir;
+  sharedDirs;
+  constructor(repoPath, options) {
+    this.repoPath = resolve(repoPath);
+    this.baseDir = options?.baseDir ?? resolve(repoPath, "..", "flowcraft-wt");
+    this.sharedDirs = [];
+  }
+  setSharedDirs(dirs) {
+    this.sharedDirs = dirs;
+  }
+  async create(agentName, taskLabel) {
+    const branchName = `flowcraft/${agentName}/${taskLabel.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40)}`;
+    const worktreePath = join2(this.baseDir, `${branchName.replace(/\//g, "-")}`);
+    if (!existsSync2(this.baseDir)) {
+      mkdirSync(this.baseDir, { recursive: true });
+    }
+    if (existsSync2(worktreePath)) {
+      try {
+        execSync(`git worktree remove "${worktreePath}" --force 2>nul`, {
+          cwd: this.repoPath,
+          stdio: "pipe",
+          timeout: 1e4
+        });
+      } catch {
+      }
+      rmSync(worktreePath, { recursive: true, force: true });
+    }
+    execSync(
+      `git worktree add -b "${branchName}" "${worktreePath}" HEAD`,
+      { cwd: this.repoPath, stdio: "pipe", timeout: 3e4 }
+    );
+    for (const dir of this.sharedDirs) {
+      const srcDir = join2(this.repoPath, dir);
+      const dstDir = join2(worktreePath, dir);
+      if (existsSync2(srcDir) && !existsSync2(dstDir)) {
+        try {
+          symlinkSync(srcDir, dstDir, "junction");
+        } catch {
+          if (!existsSync2(dstDir)) mkdirSync(dstDir, { recursive: true });
+        }
+      }
+    }
+    return { path: worktreePath, branch: branchName, agent: agentName };
+  }
+  isClean(worktree) {
+    try {
+      const status = execSync("git status --porcelain", {
+        cwd: worktree.path,
+        stdio: "pipe",
+        timeout: 1e4,
+        encoding: "utf-8"
+      });
+      return status.trim().length === 0;
+    } catch {
+      return false;
+    }
+  }
+  commit(worktree, message) {
+    execSync("git add -A", { cwd: worktree.path, stdio: "pipe", timeout: 3e4 });
+    execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
+      cwd: worktree.path,
+      stdio: "pipe",
+      timeout: 3e4
+    });
+  }
+  merge(worktree) {
+    try {
+      this.commit(worktree, `feat(flowcraft): ${worktree.agent} task`);
+      execSync(`git fetch . "${worktree.branch}"`, {
+        cwd: this.repoPath,
+        stdio: "pipe",
+        timeout: 3e4
+      });
+      execSync(`git merge "${worktree.branch}" --no-edit`, {
+        cwd: this.repoPath,
+        stdio: "pipe",
+        timeout: 6e4
+      });
+      return { success: true, message: `Merged ${worktree.branch}` };
+    } catch (err) {
+      try {
+        execSync("git merge --abort", { cwd: this.repoPath, stdio: "pipe", timeout: 1e4 });
+      } catch {
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, message: `Merge conflict: ${msg.slice(0, 200)}` };
+    }
+  }
+  async cleanup(worktree) {
+    try {
+      execSync(`git worktree remove "${worktree.path}" --force 2>nul`, {
+        cwd: this.repoPath,
+        stdio: "pipe",
+        timeout: 15e3
+      });
+    } catch {
+    }
+    if (existsSync2(worktree.path)) {
+      rmSync(worktree.path, { recursive: true, force: true });
+    }
+  }
+  async cleanupAll() {
+    try {
+      const output = execSync("git worktree list", {
+        cwd: this.repoPath,
+        stdio: "pipe",
+        timeout: 1e4,
+        encoding: "utf-8"
+      });
+      for (const line of output.split("\n")) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 1 && parts[0].includes("flowcraft-wt")) {
+          try {
+            execSync(`git worktree remove "${parts[0]}" --force 2>nul`, {
+              cwd: this.repoPath,
+              stdio: "pipe",
+              timeout: 15e3
+            });
+          } catch {
+          }
+        }
+      }
+    } catch {
+    }
+  }
+};
+
 // src/orchestrator.ts
 async function dispatchToAgent(client, parentSessionID, agentName, task) {
   const parent = await client.session.get({ path: { id: parentSessionID } }).catch(() => null);
@@ -12672,51 +12805,70 @@ ${workLogs.slice(-3).join("\n---\n")}` : "";
   return [header, timeInfo, logSection, footer].join("\n");
 }
 async function dispatchBatch(client, parentSessionID, tasks, options) {
+  const useWorktree = options?.useWorktree ?? false;
+  let wtManager = null;
+  if (useWorktree) {
+    wtManager = new WorktreeManager(process.cwd());
+    wtManager.setSharedDirs(["DiC-SR", "DiC-main", "DiC_SR_DATA"]);
+  }
   const parent = await client.session.get({ path: { id: parentSessionID } }).catch(() => null);
   const parentDir = parent?.data?.directory ?? process.cwd();
   const maxWait = (options?.maxWait ?? 120) * 1e3;
   const startTime = Date.now();
   const sessionPromises = tasks.map(async (t, i) => {
+    let sessionDir = parentDir;
+    let wt = null;
+    if (wtManager) {
+      wt = await wtManager.create(t.agent, t.task);
+      sessionDir = wt.path;
+    }
     const child = await client.session.create({
       body: {
         parentID: parentSessionID,
         title: `flowcraft-batch: ${t.agent} - ${t.task.slice(0, 60)}`
       },
-      query: { directory: parentDir }
+      query: { directory: sessionDir }
     });
     if (!child.data?.id) throw new Error(`Failed to create session for ${t.agent}`);
-    return { id: child.data.id, agent: t.agent, task: t.task, index: i };
+    return { id: child.data.id, agent: t.agent, task: t.task, index: i, directory: sessionDir, wt: wt ?? null };
   });
   const children = await Promise.all(sessionPromises);
   await Promise.all(children.map(
-    (c) => client.session.prompt({
+    (c) => client.session.promptAsync({
       path: { id: c.id },
       body: {
         parts: [{ type: "text", text: c.task }],
         agent: c.agent,
         tools: { task: false, delegate: false }
       },
-      query: { directory: parentDir }
+      query: { directory: c.directory }
     })
   ));
   while (Date.now() - startTime < maxWait) {
     await new Promise((r) => setTimeout(r, 2e3));
-    const statusRes = await client.session.status({
-      query: { directory: parentDir }
-    }).catch(() => null);
-    const statuses = statusRes?.data ?? {};
+    const dirSet = new Set(children.map((c) => c.directory));
+    const merged = {};
+    for (const dir of dirSet) {
+      const res = await client.session.status({ query: { directory: dir } }).catch(() => null);
+      if (res?.data) Object.assign(merged, res.data);
+    }
     const allIdle = children.every((c) => {
-      const s = statuses[c.id];
+      const s = merged[c.id];
       return !s || s.type === "idle";
     });
     if (allIdle) break;
   }
   const totalElapsed = ((Date.now() - startTime) / 1e3).toFixed(1);
+  const lines = [
+    `\u2501\u2501\u2501 Batch: ${tasks.length} tasks in parallel \u2501\u2501\u2501`,
+    `\u23F1 Total elapsed: ${totalElapsed}s`,
+    ``
+  ];
   const results = await Promise.allSettled(children.map(async (c) => {
     const cStart = Date.now();
     const msgRes = await client.session.messages({
       path: { id: c.id },
-      query: { directory: parentDir, limit: 20 }
+      query: { directory: c.directory, limit: 20 }
     }).catch(() => null);
     const msgs = msgRes?.data ?? [];
     const logs = msgs.filter((m) => m.info?.role === "assistant").flatMap(
@@ -12729,11 +12881,19 @@ async function dispatchBatch(client, parentSessionID, tasks, options) {
       elapsed: Number(((Date.now() - cStart) / 1e3).toFixed(1))
     };
   }));
-  const lines = [
-    `\u2501\u2501\u2501 Batch: ${tasks.length} tasks in parallel \u2501\u2501\u2501`,
-    `\u23F1 Total elapsed: ${totalElapsed}s`,
-    ``
-  ];
+  if (wtManager) {
+    for (const c of children) {
+      const wt = c.wt;
+      if (!wt) continue;
+      if (!wtManager.isClean(wt)) {
+        const mergeResult = wtManager.merge(wt);
+        if (!mergeResult.success) {
+          lines.push(`[\u26A0] Worktree merge failed for ${c.agent}: ${mergeResult.message}`);
+        }
+      }
+      await wtManager.cleanup(wt);
+    }
+  }
   results.forEach((r, i) => {
     const c = children[i];
     if (r.status === "fulfilled") {
@@ -12749,9 +12909,9 @@ async function dispatchBatch(client, parentSessionID, tasks, options) {
 }
 
 // src/skills.ts
-import { existsSync as existsSync2, readFileSync as readFileSync3, readdirSync, statSync } from "node:fs";
+import { existsSync as existsSync3, readFileSync as readFileSync3, readdirSync, statSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
-import { join as join2, resolve } from "node:path";
+import { join as join3, resolve as resolve2 } from "node:path";
 var SKILL_FILE = "SKILL.md";
 function parseFrontmatter(raw) {
   const lines = raw.split(/\r?\n/);
@@ -12775,24 +12935,24 @@ var SkillStore = class {
   projectRoot;
   constructor(opts = {}) {
     this.homeDir = opts.homeDir ?? homedir2();
-    this.projectRoot = opts.projectRoot ? resolve(opts.projectRoot) : void 0;
+    this.projectRoot = opts.projectRoot ? resolve2(opts.projectRoot) : void 0;
   }
   /** Scan paths in priority order */
   roots() {
     const out = [];
     if (this.projectRoot) {
       for (const sub of [".deepcode", ".reasonix"]) {
-        out.push({ dir: join2(this.projectRoot, sub, "skills"), scope: "project" });
+        out.push({ dir: join3(this.projectRoot, sub, "skills"), scope: "project" });
       }
     }
-    out.push({ dir: join2(this.homeDir, ".agents", "skills"), scope: "global" });
+    out.push({ dir: join3(this.homeDir, ".agents", "skills"), scope: "global" });
     return out;
   }
   /** List all available skills */
   list() {
     const byName = /* @__PURE__ */ new Map();
     for (const { dir, scope } of this.roots()) {
-      if (!existsSync2(dir)) continue;
+      if (!existsSync3(dir)) continue;
       let entries;
       try {
         entries = readdirSync(dir, { withFileTypes: true });
@@ -12810,13 +12970,13 @@ var SkillStore = class {
   /** Read one skill by name */
   read(name) {
     for (const { dir, scope } of this.roots()) {
-      if (!existsSync2(dir)) continue;
-      const dirCandidate = join2(dir, name, SKILL_FILE);
-      if (existsSync2(dirCandidate) && statSync(dirCandidate).isFile()) {
+      if (!existsSync3(dir)) continue;
+      const dirCandidate = join3(dir, name, SKILL_FILE);
+      if (existsSync3(dirCandidate) && statSync(dirCandidate).isFile()) {
         return this.parse(dirCandidate, name, scope);
       }
-      const flatCandidate = join2(dir, `${name}.md`);
-      if (existsSync2(flatCandidate) && statSync(flatCandidate).isFile()) {
+      const flatCandidate = join3(dir, `${name}.md`);
+      if (existsSync3(flatCandidate) && statSync(flatCandidate).isFile()) {
         return this.parse(flatCandidate, name, scope);
       }
     }
@@ -12824,13 +12984,13 @@ var SkillStore = class {
   }
   readEntry(dir, scope, entry) {
     if (entry.isDirectory()) {
-      const file2 = join2(dir, entry.name, SKILL_FILE);
-      if (!existsSync2(file2)) return null;
+      const file2 = join3(dir, entry.name, SKILL_FILE);
+      if (!existsSync3(file2)) return null;
       return this.parse(file2, entry.name, scope);
     }
     if (entry.isFile() && entry.name.endsWith(".md")) {
       const stem = entry.name.slice(0, -3);
-      return this.parse(join2(dir, entry.name), stem, scope);
+      return this.parse(join3(dir, entry.name), stem, scope);
     }
     return null;
   }
@@ -12877,19 +13037,19 @@ var SkillStore = class {
 };
 
 // src/index.ts
-import { readFileSync as readFileSync4, existsSync as existsSync3 } from "node:fs";
-import { join as join3 } from "node:path";
+import { readFileSync as readFileSync4, existsSync as existsSync4 } from "node:fs";
+import { join as join4 } from "node:path";
 import { homedir as homedir3 } from "node:os";
 var currentSessionID = "";
 var currentToolName = "";
 var skillStore = new SkillStore({ projectRoot: process.cwd() });
 function loadDMXKey() {
   const candidates = [
-    join3(process.cwd(), ".opencode", "opencode.jsonc"),
-    join3(homedir3(), ".config", "opencode", "opencode.jsonc")
+    join4(process.cwd(), ".opencode", "opencode.jsonc"),
+    join4(homedir3(), ".config", "opencode", "opencode.jsonc")
   ];
   for (const p of candidates) {
-    if (!existsSync3(p)) continue;
+    if (!existsSync4(p)) continue;
     try {
       const raw = readFileSync4(p, "utf-8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
       const config2 = JSON.parse(raw);

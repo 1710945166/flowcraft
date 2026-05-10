@@ -96,7 +96,6 @@ export async function dispatchBatch(
 ): Promise<string> {
   const useWorktree = options?.useWorktree ?? false
   let wtManager: WorktreeManager | null = null
-  const worktreeMap = new Map<string, WorktreeInfo>()
 
   if (useWorktree) {
     wtManager = new WorktreeManager(process.cwd())
@@ -112,9 +111,9 @@ export async function dispatchBatch(
   // Phase 1: create all child sessions in parallel (optionally with worktrees)
   const sessionPromises = tasks.map(async (t, i) => {
     let sessionDir = parentDir
+    let wt: WorktreeInfo | null = null
     if (wtManager) {
-      const wt = await wtManager.create(t.agent, t.task)
-      worktreeMap.set(t.agent, wt)
+      wt = await wtManager.create(t.agent, t.task)
       sessionDir = wt.path
     }
     const child = await client.session.create({
@@ -125,32 +124,34 @@ export async function dispatchBatch(
       query: { directory: sessionDir },
     })
     if (!child.data?.id) throw new Error(`Failed to create session for ${t.agent}`)
-    return { id: child.data.id, agent: t.agent, task: t.task, index: i }
+    return { id: child.data.id, agent: t.agent, task: t.task, index: i, directory: sessionDir, wt: wt ?? null }
   })
   const children = await Promise.all(sessionPromises)
 
-  // Phase 2: send prompts in parallel (promptAsync returns immediately)
+  // Phase 2: 并行发送 promptAsync（立即返回 204）
   await Promise.all(children.map(c =>
-    client.session.prompt({
+    client.session.promptAsync({
       path: { id: c.id },
       body: {
         parts: [{ type: "text", text: c.task }],
         agent: c.agent,
         tools: { task: false, delegate: false },
       },
-      query: { directory: parentDir },
+      query: { directory: c.directory },
     })
   ))
 
-  // Phase 3: poll until all sessions are idle
+  // Phase 3: poll until all sessions are idle (query each child's directory)
   while (Date.now() - startTime < maxWait) {
     await new Promise(r => setTimeout(r, 2000))
-    const statusRes = await client.session.status({
-      query: { directory: parentDir },
-    }).catch(() => null)
-    const statuses = statusRes?.data ?? {}
+    const dirSet = new Set(children.map(c => c.directory))
+    const merged: Record<string, { type: string }> = {}
+    for (const dir of dirSet) {
+      const res = await client.session.status({ query: { directory: dir } }).catch(() => null)
+      if (res?.data) Object.assign(merged, res.data)
+    }
     const allIdle = children.every(c => {
-      const s = (statuses as Record<string, { type: string }>)[c.id]
+      const s = merged[c.id]
       return !s || s.type === "idle"
     })
     if (allIdle) break
@@ -170,7 +171,7 @@ export async function dispatchBatch(
     const cStart = Date.now()
     const msgRes = await client.session.messages({
       path: { id: c.id },
-      query: { directory: parentDir, limit: 20 },
+      query: { directory: c.directory, limit: 20 },
     }).catch(() => null)
     const msgs = msgRes?.data ?? []
     const logs = msgs
@@ -192,7 +193,7 @@ export async function dispatchBatch(
   // Phase 4.5: merge worktrees back if enabled
   if (wtManager) {
     for (const c of children) {
-      const wt = worktreeMap.get(c.agent)
+      const wt = c.wt
       if (!wt) continue
       if (!wtManager.isClean(wt)) {
         const mergeResult = wtManager.merge(wt)

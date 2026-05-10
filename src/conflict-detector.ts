@@ -56,15 +56,20 @@ export function gitMergeConflict(
   branchB: string
 ): ConflictReport {
   try {
-    // merge-tree 无副作用，只输出合并结果
+    // Step 1: 获取 merge-base
+    const mergeBase = execSync(
+      `git merge-base "${branchA}" "${branchB}"`,
+      { cwd: repoPath, encoding: "utf-8", timeout: 10000, stdio: "pipe" }
+    ).trim()
+
+    // Step 2: 用 merge-base 做无副作用合并检测
     const output = execSync(
-      `git merge-tree $(git merge-base HEAD "${branchA}") HEAD "${branchB}"`,
+      `git merge-tree "${mergeBase}" "${branchA}" "${branchB}"`,
       { cwd: repoPath, encoding: "utf-8", timeout: 30000, stdio: "pipe" }
     )
 
-    // 检查输出中是否有冲突标记
+    // 检查是否有冲突标记
     if (output.includes("<<<<<<<") || output.includes("=======") || output.includes(">>>>>>>")) {
-      // 提取冲突文件列表
       const conflictFiles = output
         .split("\n")
         .filter(l => l.includes("changed in both"))
