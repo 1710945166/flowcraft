@@ -12671,6 +12671,82 @@ ${workLogs.slice(-3).join("\n---\n")}` : "";
   const footer = `\u2501\u2501\u2501 End of ${agentName} output \u2501\u2501\u2501`;
   return [header, timeInfo, logSection, footer].join("\n");
 }
+async function dispatchBatch(client, parentSessionID, tasks, options) {
+  const parent = await client.session.get({ path: { id: parentSessionID } }).catch(() => null);
+  const parentDir = parent?.data?.directory ?? process.cwd();
+  const maxWait = (options?.maxWait ?? 120) * 1e3;
+  const startTime = Date.now();
+  const sessionPromises = tasks.map(async (t, i) => {
+    const child = await client.session.create({
+      body: {
+        parentID: parentSessionID,
+        title: `flowcraft-batch: ${t.agent} - ${t.task.slice(0, 60)}`
+      },
+      query: { directory: parentDir }
+    });
+    if (!child.data?.id) throw new Error(`Failed to create session for ${t.agent}`);
+    return { id: child.data.id, agent: t.agent, task: t.task, index: i };
+  });
+  const children = await Promise.all(sessionPromises);
+  await Promise.all(children.map(
+    (c) => client.session.prompt({
+      path: { id: c.id },
+      body: {
+        parts: [{ type: "text", text: c.task }],
+        agent: c.agent,
+        tools: { task: false, delegate: false }
+      },
+      query: { directory: parentDir }
+    })
+  ));
+  while (Date.now() - startTime < maxWait) {
+    await new Promise((r) => setTimeout(r, 2e3));
+    const statusRes = await client.session.status({
+      query: { directory: parentDir }
+    }).catch(() => null);
+    const statuses = statusRes?.data ?? {};
+    const allIdle = children.every((c) => {
+      const s = statuses[c.id];
+      return !s || s.type === "idle";
+    });
+    if (allIdle) break;
+  }
+  const totalElapsed = ((Date.now() - startTime) / 1e3).toFixed(1);
+  const results = await Promise.allSettled(children.map(async (c) => {
+    const cStart = Date.now();
+    const msgRes = await client.session.messages({
+      path: { id: c.id },
+      query: { directory: parentDir, limit: 20 }
+    }).catch(() => null);
+    const msgs = msgRes?.data ?? [];
+    const logs = msgs.filter((m) => m.info?.role === "assistant").flatMap(
+      (m) => m.parts.filter((p) => p.type === "text").map((p) => p.text || "").filter(Boolean)
+    );
+    return {
+      agent: c.agent,
+      success: true,
+      output: logs.slice(-3).join("\n---\n"),
+      elapsed: Number(((Date.now() - cStart) / 1e3).toFixed(1))
+    };
+  }));
+  const lines = [
+    `\u2501\u2501\u2501 Batch: ${tasks.length} tasks in parallel \u2501\u2501\u2501`,
+    `\u23F1 Total elapsed: ${totalElapsed}s`,
+    ``
+  ];
+  results.forEach((r, i) => {
+    const c = children[i];
+    if (r.status === "fulfilled") {
+      lines.push(`[\u2713] ${c.agent} (${r.value.elapsed}s)`);
+      if (r.value.output) lines.push(`    ${r.value.output.slice(0, 200)}`);
+    } else {
+      lines.push(`[\u2717] ${c.agent} \u2014 ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`);
+    }
+    lines.push(``);
+  });
+  lines.push(`\u2501\u2501\u2501 Batch complete \u2501\u2501\u2501`);
+  return lines.join("\n");
+}
 
 // src/skills.ts
 import { existsSync as existsSync2, readFileSync as readFileSync3, readdirSync, statSync } from "node:fs";
@@ -12942,6 +13018,33 @@ var flowcraft = async ({ client, directory }, options) => {
           }
         }
       }),
+      delegate_batch: tool({
+        description: `Delegate MULTIPLE tasks to specialist agents IN PARALLEL. All tasks run simultaneously. Before using, ensure tasks don't modify the SAME file. Available: ${agentNames}`,
+        args: {
+          tasks: tool.schema.array(tool.schema.object({
+            agent: tool.schema.string().describe(`Agent name (${agentNames})`),
+            task: tool.schema.string().describe("Detailed task description"),
+            files: tool.schema.array(tool.schema.string()).optional().describe("Files this task will modify (for conflict detection)")
+          })).describe("Tasks to run in parallel (2-5 tasks)")
+        },
+        async execute(args) {
+          const unknown2 = args.tasks.find((t) => !agents.find((a) => a.name === t.agent));
+          if (unknown2) return `Unknown agent "${unknown2.agent}". Available: ${agentNames}`;
+          if (!currentSessionID) return "Error: no active session ID";
+          try {
+            try {
+              await client.tui.showToast({
+                body: { message: `Dispatching ${args.tasks.length} tasks in parallel...`, variant: "info" }
+              });
+            } catch {
+            }
+            const result = await dispatchBatch(client, currentSessionID, args.tasks);
+            return `[flowcraft] ${result}`;
+          } catch (err) {
+            return `Error: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        }
+      }),
       run_skill: tool({
         description: "Invoke a skill by name. Skills are reusable prompt packs. Use [subagent] skills for isolated exploration; inline skills inject instructions directly.",
         args: {
@@ -13019,6 +13122,28 @@ Agent mapping (MEMORIZE THIS):
   Experiment/data analysis \u2192 analyst
   Writing/docs \u2192 writer
   Image analysis \u2192 vision
+
+## Parallel Dispatch Rules
+
+When delegating MULTIPLE tasks, use delegate_batch for parallelism.
+
+BEFORE calling delegate_batch, you MUST ensure:
+1. No two tasks modify the same file
+2. If files overlap \u2192 use sequential delegate (NOT delegate_batch)
+3. Max 5 tasks per batch
+4. Reader tasks (analyst) can overlap with writer tasks safely
+
+Example:
+  Good: delegate_batch(tasks=[
+    {agent: "coder", task: "fix login bug"},
+    {agent: "writer", task: "update README"}
+  ])
+  
+  Bad: delegate_batch(tasks=[
+    {agent: "coder", task: "edit main.ts"},
+    {agent: "coder", task: "also edit main.ts"}  // SAME FILE!
+  ])
+  \u2192 Use: delegate(coder, "edit main.ts: fix login bug")
 
 ${agentUsageTips}
 `);

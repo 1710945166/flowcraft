@@ -9,7 +9,9 @@
       "import": "./dist/bundle.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc && node scripts/build.js",
     "typecheck": "tsc --noEmit",
@@ -17,7 +19,11 @@
     "dev": "node scripts/dev.mjs --watch",
     "deploy": "node scripts/dev.mjs"
   },
-  "keywords": ["opencode", "plugin", "agents"],
+  "keywords": [
+    "opencode",
+    "plugin",
+    "agents"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -29,9 +35,11 @@
   },
   "dependencies": {
     "@opencode-ai/plugin": "^1.4.0",
-    "@opencode-ai/sdk": "^1.4.0"
+    "@opencode-ai/sdk": "^1.4.0",
+    "diff": "^9.0.0"
   },
   "devDependencies": {
+    "@types/diff": "^7.0.2",
     "@types/node": "^22.0.0",
     "esbuild": "^0.28.0",
     "typescript": "^5.7.0"

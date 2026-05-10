@@ -3,7 +3,7 @@ import { tool } from "@opencode-ai/plugin"
 import { loadConfig, loadProjectConfig, readOpencodeAgents } from "./config.js"
 import { applyHashlineEdits, readWithHash, createHashlineSystemPrompt, type HashlineEditInput } from "./hashline.js"
 import { createTodoEnforcer } from "./todo-enforcer.js"
-import { dispatchToAgent } from "./orchestrator.js"
+import { dispatchToAgent, dispatchBatch } from "./orchestrator.js"
 import { SkillStore } from "./skills.js"
 import type { UserMessage } from "@opencode-ai/sdk"
 import { readFileSync, existsSync } from "node:fs"
@@ -157,6 +157,33 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
         },
       }),
 
+      delegate_batch: tool({
+        description: `Delegate MULTIPLE tasks to specialist agents IN PARALLEL. All tasks run simultaneously. Before using, ensure tasks don't modify the SAME file. Available: ${agentNames}`,
+        args: {
+          tasks: tool.schema.array(tool.schema.object({
+            agent: tool.schema.string().describe(`Agent name (${agentNames})`),
+            task: tool.schema.string().describe("Detailed task description"),
+            files: tool.schema.array(tool.schema.string()).optional().describe("Files this task will modify (for conflict detection)"),
+          })).describe("Tasks to run in parallel (2-5 tasks)"),
+        },
+        async execute(args: { tasks: Array<{ agent: string; task: string; files?: string[] }> }): Promise<ToolResult> {
+          const unknown = args.tasks.find(t => !agents.find(a => a.name === t.agent))
+          if (unknown) return `Unknown agent "${unknown.agent}". Available: ${agentNames}`
+          if (!currentSessionID) return "Error: no active session ID"
+          try {
+            try {
+              await client.tui.showToast({
+                body: { message: `Dispatching ${args.tasks.length} tasks in parallel...`, variant: "info" },
+              })
+            } catch { /* TUI may not support */ }
+            const result = await dispatchBatch(client, currentSessionID, args.tasks)
+            return `[flowcraft] ${result}`
+          } catch (err) {
+            return `Error: ${err instanceof Error ? err.message : String(err)}`
+          }
+        },
+      }),
+
       run_skill: tool({
         description: "Invoke a skill by name. Skills are reusable prompt packs. Use [subagent] skills for isolated exploration; inline skills inject instructions directly.",
         args: {
@@ -233,6 +260,28 @@ Agent mapping (MEMORIZE THIS):
   Experiment/data analysis → analyst
   Writing/docs → writer
   Image analysis → vision
+
+## Parallel Dispatch Rules
+
+When delegating MULTIPLE tasks, use delegate_batch for parallelism.
+
+BEFORE calling delegate_batch, you MUST ensure:
+1. No two tasks modify the same file
+2. If files overlap → use sequential delegate (NOT delegate_batch)
+3. Max 5 tasks per batch
+4. Reader tasks (analyst) can overlap with writer tasks safely
+
+Example:
+  Good: delegate_batch(tasks=[
+    {agent: "coder", task: "fix login bug"},
+    {agent: "writer", task: "update README"}
+  ])
+  
+  Bad: delegate_batch(tasks=[
+    {agent: "coder", task: "edit main.ts"},
+    {agent: "coder", task: "also edit main.ts"}  // SAME FILE!
+  ])
+  → Use: delegate(coder, "edit main.ts: fix login bug")
 
 ${agentUsageTips}
 `)}

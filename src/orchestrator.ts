@@ -72,3 +72,118 @@ export async function dispatchToAgent(
 
   return [header, timeInfo, logSection, footer].join("\n")
 }
+
+export interface BatchTask {
+  agent: string
+  task: string
+}
+
+export interface BatchResult {
+  agent: string
+  success: boolean
+  output: string
+  error?: string
+  elapsed: number
+}
+
+export async function dispatchBatch(
+  client: OpencodeClient,
+  parentSessionID: string,
+  tasks: BatchTask[],
+  options?: { maxWait?: number }
+): Promise<string> {
+  const parent = await client.session
+    .get({ path: { id: parentSessionID } })
+    .catch(() => null)
+  const parentDir = parent?.data?.directory ?? process.cwd()
+  const maxWait = (options?.maxWait ?? 120) * 1000
+  const startTime = Date.now()
+
+  // Phase 1: create all child sessions in parallel
+  const sessionPromises = tasks.map(async (t, i) => {
+    const child = await client.session.create({
+      body: {
+        parentID: parentSessionID,
+        title: `flowcraft-batch: ${t.agent} - ${t.task.slice(0, 60)}`,
+      } as Record<string, unknown>,
+      query: { directory: parentDir },
+    })
+    if (!child.data?.id) throw new Error(`Failed to create session for ${t.agent}`)
+    return { id: child.data.id, agent: t.agent, task: t.task, index: i }
+  })
+  const children = await Promise.all(sessionPromises)
+
+  // Phase 2: send prompts in parallel (promptAsync returns immediately)
+  await Promise.all(children.map(c =>
+    client.session.prompt({
+      path: { id: c.id },
+      body: {
+        parts: [{ type: "text", text: c.task }],
+        agent: c.agent,
+        tools: { task: false, delegate: false },
+      },
+      query: { directory: parentDir },
+    })
+  ))
+
+  // Phase 3: poll until all sessions are idle
+  while (Date.now() - startTime < maxWait) {
+    await new Promise(r => setTimeout(r, 2000))
+    const statusRes = await client.session.status({
+      query: { directory: parentDir },
+    }).catch(() => null)
+    const statuses = statusRes?.data ?? {}
+    const allIdle = children.every(c => {
+      const s = (statuses as Record<string, { type: string }>)[c.id]
+      return !s || s.type === "idle"
+    })
+    if (allIdle) break
+  }
+
+  const totalElapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+
+  // Phase 4: collect results in parallel (allSettled prevents single failure from blocking)
+  const results = await Promise.allSettled(children.map(async (c) => {
+    const cStart = Date.now()
+    const msgRes = await client.session.messages({
+      path: { id: c.id },
+      query: { directory: parentDir, limit: 20 },
+    }).catch(() => null)
+    const msgs = msgRes?.data ?? []
+    const logs = msgs
+      .filter((m: any) => m.info?.role === "assistant")
+      .flatMap((m: any) =>
+        m.parts
+          .filter((p: any) => p.type === "text")
+          .map((p: any) => p.text || "")
+          .filter(Boolean)
+      )
+    return {
+      agent: c.agent,
+      success: true,
+      output: logs.slice(-3).join("\n---\n"),
+      elapsed: Number(((Date.now() - cStart) / 1000).toFixed(1)),
+    } as BatchResult
+  }))
+
+  // Phase 5: format output
+  const lines: string[] = [
+    `━━━ Batch: ${tasks.length} tasks in parallel ━━━`,
+    `⏱ Total elapsed: ${totalElapsed}s`,
+    ``,
+  ]
+
+  results.forEach((r, i) => {
+    const c = children[i]
+    if (r.status === "fulfilled") {
+      lines.push(`[✓] ${c.agent} (${r.value.elapsed}s)`)
+      if (r.value.output) lines.push(`    ${r.value.output.slice(0, 200)}`)
+    } else {
+      lines.push(`[✗] ${c.agent} — ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`)
+    }
+    lines.push(``)
+  })
+
+  lines.push(`━━━ Batch complete ━━━`)
+  return lines.join("\n")
+}
