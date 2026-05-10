@@ -253,6 +253,11 @@ HOW TO DELEGATE — use the delegate tool:
   delegate(agent: "agent-name", task: "detailed task description")
 Example: delegate(agent: "coder", task: "Calculate RMSE from pred.npy and true.npy")
 
+NOTE: The built-in \`task\` tool provides a sub-window showing sub-agent progress.
+If \`task\` is available in your tool list, PREFER using it:
+  task(prompt: "task description", description: "label", subagent_type: "agent-name")
+If \`task\` is not available, use \`delegate\` instead.
+
 Agent mapping (MEMORIZE THIS):
   Any coding/debug/refactor/test → coder
   Code review → reviewer

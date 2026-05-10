@@ -12505,6 +12505,7 @@ function readOpencodeAgents() {
       if (!agents || typeof agents !== "object") continue;
       for (const [name, v] of Object.entries(agents)) {
         if (v?.mode === "primary") continue;
+        if (v?.disable === true) continue;
         if (seen.has(name)) continue;
         seen.add(name);
         result.push({
@@ -13274,6 +13275,11 @@ ${agentList}
 HOW TO DELEGATE \u2014 use the delegate tool:
   delegate(agent: "agent-name", task: "detailed task description")
 Example: delegate(agent: "coder", task: "Calculate RMSE from pred.npy and true.npy")
+
+NOTE: The built-in \`task\` tool provides a sub-window showing sub-agent progress.
+If \`task\` is available in your tool list, PREFER using it:
+  task(prompt: "task description", description: "label", subagent_type: "agent-name")
+If \`task\` is not available, use \`delegate\` instead.
 
 Agent mapping (MEMORIZE THIS):
   Any coding/debug/refactor/test \u2192 coder

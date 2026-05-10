@@ -102,6 +102,7 @@ export function readOpencodeAgents(): AgentInfo[] {
       if (!agents || typeof agents !== "object") continue
       for (const [name, v] of Object.entries(agents)) {
         if ((v as any)?.mode === "primary") continue
+        if ((v as any)?.disable === true) continue  // 跳过禁用 agent
         if (seen.has(name)) continue
         seen.add(name)
         result.push({
