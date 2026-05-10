@@ -4,6 +4,12 @@ import { join } from "node:path"
 
 export interface FlowcraftConfig {
   disabled?: boolean
+  configPath?: string
+  orchestrator?: {
+    allowedTools?: string[]
+    deniedTools?: string[]
+    extraPrompt?: string
+  }
 }
 
 function resolveConfigPath(directory: string): string {
@@ -43,6 +49,25 @@ function parseOptions(options?: Record<string, unknown>): FlowcraftConfig | null
   return { disabled: (src as any).disabled as boolean | undefined }
 }
 
+export function loadProjectConfig(): FlowcraftConfig {
+  const candidates = [
+    join(process.cwd(), "flowcraft.config.json"),
+    join(process.cwd(), "flowcraft.config.jsonc"),
+    join(process.cwd(), ".flowcraftrc"),
+    join(process.cwd(), ".flowcraftrc.json"),
+  ]
+  for (const p of candidates) {
+    if (!existsSync(p)) continue
+    try {
+      const raw = readFileSync(p, "utf-8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "")
+      return { ...JSON.parse(raw) as FlowcraftConfig, configPath: p }
+    } catch { /* next */ }
+  }
+  return {}
+}
+
 export interface AgentInfo {
   name: string
   description: string
@@ -66,6 +91,8 @@ export function readOpencodeAgents(): AgentInfo[] {
     join(homedir(), ".config", "opencode", "opencode.jsonc"),
     join(homedir(), ".config", "opencode", "opencode.json"),
   ]
+  const seen = new Set<string>()
+  const result: AgentInfo[] = []
   for (const p of candidates) {
     if (!existsSync(p)) continue
     try {
@@ -73,15 +100,19 @@ export function readOpencodeAgents(): AgentInfo[] {
       const config = JSON.parse(raw)
       const agents = config?.agent
       if (!agents || typeof agents !== "object") continue
-      return Object.entries(agents)
-        .filter(([_, v]) => (v as any)?.mode !== "primary")
-        .map(([name, v]) => ({
+      for (const [name, v] of Object.entries(agents)) {
+        if ((v as any)?.mode === "primary") continue
+        if (seen.has(name)) continue
+        seen.add(name)
+        result.push({
           name,
           description: (v as any).description || name,
           model: (v as any).model || "",
           mode: (v as any).mode,
-        }))
+        })
+      }
     } catch { /* next */ }
   }
-  return DEFAULT_AGENTS
+  return result.length > 0 ? result : DEFAULT_AGENTS
+
 }

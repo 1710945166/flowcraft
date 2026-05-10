@@ -1,6 +1,6 @@
 import type { Plugin, ToolResult } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
-import { loadConfig, readOpencodeAgents } from "./config.js"
+import { loadConfig, loadProjectConfig, readOpencodeAgents } from "./config.js"
 import { applyHashlineEdits, readWithHash, createHashlineSystemPrompt, type HashlineEditInput } from "./hashline.js"
 import { createTodoEnforcer } from "./todo-enforcer.js"
 import { dispatchToAgent } from "./orchestrator.js"
@@ -34,6 +34,8 @@ function loadDMXKey(): string | null {
 export const flowcraft: Plugin = async ({ client, directory }, options) => {
   const config = loadConfig(directory, options)
   if (config.disabled) return {}
+
+  const projectConfig = loadProjectConfig()
 
   const agents = readOpencodeAgents()
   const agentList = agents.map(a => `  - ${a.name}: ${a.description}`).join("\n")
@@ -142,8 +144,13 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
             return "Error: no active session ID"
           }
           try {
+            try {
+              await client.tui.showToast({
+                body: { message: `Delegating to ${args.agent}...`, variant: "info" },
+              })
+            } catch { /* TUI may not support toast */ }
             const result = await dispatchToAgent(client, currentSessionID, args.agent, args.task)
-            return `[flowcraft] Dispatched to "${args.agent}".\n\nResult:\n${result}`
+            return `[flowcraft] ${result}`
           } catch (err) {
             return `Error dispatching to "${args.agent}": ${err instanceof Error ? err.message : String(err)}`
           }
@@ -202,15 +209,22 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
     "experimental.chat.system.transform": async (_input, output) => {
       output.system.push(createHashlineSystemPrompt())
       if (agents.length > 0) {
+        const orch = projectConfig.orchestrator
+        const allowedToolsStr = orch?.allowedTools?.length
+          ? orch.allowedTools.join(", ")
+          : "delegate, read, glob, grep, flowcraft_status"
+        const extraPromptSection = orch?.extraPrompt
+          ? `\n${orch.extraPrompt}\n`
+          : ""
         output.system.push(`## Delegation System — YOU MUST USE THIS
 
-You have specialist sub-agents. FAILURE TO DELEGATE IS A BUG. You NEVER code, review, write, or analyze yourself.
+${extraPromptSection}You are the ORCHESTRATOR, not a worker. Your tool access is STRICTLY LIMITED to: ${allowedToolsStr}. You CANNOT use write, edit, bash, webfetch, read_with_hash, hashline_edit, analyze_image, run_skill, or any MCP tools. If you need these — DELEGATE. You NEVER code, review, write, or analyze yourself. FAILURE TO DELEGATE IS A BUG.
 
 ${agentList}
 
-HOW TO DELEGATE — call the built-in task tool:
-  task(prompt: "task description", description: "label", subagent_type: "agent-name")
-Example: task(prompt: "Calculate RMSE from pred.npy and true.npy", description: "coding: RMSE", subagent_type: "coder")
+HOW TO DELEGATE — use the delegate tool:
+  delegate(agent: "agent-name", task: "detailed task description")
+Example: delegate(agent: "coder", task: "Calculate RMSE from pred.npy and true.npy")
 
 Agent mapping (MEMORIZE THIS):
   Any coding/debug/refactor/test → coder
