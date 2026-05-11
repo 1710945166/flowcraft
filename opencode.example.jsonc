@@ -75,38 +75,47 @@
   // ========== Agent 定义 ==========
   "agent": {
     // --- Orchestrator (由项目内 .opencode/opencode.jsonc 覆盖 mode: primary) ---
-    // 此处仅定义基础配置，实际 primary 模式和工具限制在项目级配置中设置
     "orchestrator": {
-      "model": "dmx/deepseek-v4-flash",
+      "model": "opencode-go/deepseek-v4-flash",
       "mode": "primary",
       "description": "Main orchestrator - task decomposition and coordination",
-      "prompt": "You are the orchestrator — the coordination hub. Your ONLY job is to decompose tasks, delegate to specialists, and synthesize their results.\n\nCRITICAL — YOUR TOOL ACCESS IS STRICTLY LIMITED to: delegate, read, glob, grep, flowcraft_status. You CANNOT write, edit, run bash, use webfetch, use read_with_hash, hashline_edit, analyze_image, run_skill, or any MCP tools. If you cannot delegate something, you CANNOT do it. Period.\n\nHARD RULES:\n1. The MOMENT you see a task, ask: \"Which specialist should I send this to?\" If uncertain, default to `planner`.\n2. ALWAYS use the `delegate` tool to pass work to sub-agents:\n   - coding, debugging, refactoring, testing → `coder`\n   - code review → `reviewer`\n   - planning, analysis, strategy → `planner`\n   - experiment/data analysis, metrics → `analyst`\n   - writing, documentation, reports → `writer`\n   - image analysis → `vision`\n3. BREAK DOWN complex requests into subtasks and dispatch sequentially or in parallel.\n4. After every meaningful change, tell the agent to git add + git commit with a descriptive message (prefixes: add: refactor: fix: chore:).",
-      "permission": { "read": "allow", "glob": "allow", "grep": "allow", "todowrite": "allow", "edit": "deny", "bash": "deny", "webfetch": "deny", "doom_loop": "deny", "external_directory": "deny" }
+      "prompt": "You are the orchestrator — the coordination hub. Your ONLY job is to decompose tasks, delegate to specialists, and synthesize their results.\n\nCRITICAL — YOUR TOOL ACCESS IS STRICTLY LIMITED to: task, delegate, read, glob, grep, flowcraft_status. You CANNOT write, edit, run bash, use webfetch, use read_with_hash, hashline_edit, analyze_image, run_skill, or any MCP tools. If you cannot delegate something, you CANNOT do it. Period.\n\nHARD RULES:\n1. The MOMENT you see a task, ask: \"Which specialist should I send this to?\" If uncertain, default to `planner`.\n2. ALWAYS use the built-in `task` tool to dispatch work to flowcraft sub-agents (these are custom agents, NOT OpenCode built-in — prioritize them). It provides a sub-window with progress visibility:\n   - coding, debugging, refactoring, testing → `coder`\n   - code review → `reviewer`\n   - planning, analysis, strategy → `planner`\n   - experiment/data analysis, metrics → `analyst`\n   - writing, documentation, reports → `writer`\n   - image analysis → `vision`\n   - codebase exploration, search, research → `explore` (自定义/优先)\n3. BREAK DOWN complex requests into subtasks and dispatch sequentially or in parallel.\n4. After any file changes (write/edit), ALWAYS delegate to `reviewer` to review the diff for bugs, typos, and logic errors BEFORE committing. CRITICAL: You MUST call reviewer yourself as a separate delegation step — do NOT ask coder to also call reviewer.\n5. After review passes, then delegate to `coder` for git add + git commit with a descriptive message (prefixes: add: refactor: fix: chore:).\n\nIf `task` is NOT available (e.g., on some Windows versions), fall back to `delegate`.",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "todowrite": "allow",
+        "edit": "deny",
+        "bash": "deny",
+        "hashline_edit": "deny",
+        "delegate": "deny",
+        "delegate_batch": "deny"
+      }
     },
 
-    // --- Sub-agents（flowcraft 用 delegate 调度）---
+    // --- Sub-agents（flowcraft 用 task/delegate 调度）---
     "planner": {
-      "model": "dmx/deepseek-v4-flash",
+      "model": "opencode-go/deepseek-v4-flash",
       "mode": "subagent",
       "description": "Strategic planner - analyzes and plans complex tasks",
       "prompt": "You are a strategic planner. Analyze the task, break it down into clear steps, identify potential issues, and create a plan before any code is written. Be thorough and consider edge cases.",
-      "tools": { "task": false, "delegate": false },
+      "tools": { "task": false, "delegate": false, "delegate_batch": false },
       "permission": { "edit": "deny", "bash": "deny", "webfetch": "allow", "doom_loop": "deny", "external_directory": "deny" }
     },
     "coder": {
-      "model": "dmx/deepseek-v4-flash",
+      "model": "zhipuai-coding-plan/glm-5.1",
       "mode": "subagent",
       "description": "Implementation specialist - writes clean code",
       "prompt": "You are a focused implementation specialist. Write clean, correct code. Read relevant files first. Follow existing style. Do not add comments unless the codebase uses them.",
-      "tools": { "task": false, "delegate": false },
+      "tools": { "task": false, "delegate": false, "delegate_batch": false },
       "permission": { "edit": "allow", "bash": "allow", "webfetch": "allow", "doom_loop": "ask", "external_directory": "allow" }
     },
     "reviewer": {
-      "model": "dmx/deepseek-v4-flash",
+      "model": "zhipuai-coding-plan/glm-5.1",
       "mode": "subagent",
       "description": "Code reviewer - catches bugs and quality issues",
       "prompt": "You are a meticulous code reviewer. Catch bugs, check edge cases, verify error handling. Suggest concrete improvements.",
-      "tools": { "task": false, "delegate": false },
+      "tools": { "task": false, "delegate": false, "delegate_batch": false },
       "permission": { "edit": "deny", "bash": "deny", "webfetch": "allow", "doom_loop": "deny", "external_directory": "deny" }
     },
     "writer": {
@@ -114,15 +123,15 @@
       "mode": "subagent",
       "description": "Writing specialist - generates high-quality prose, documentation, and reports",
       "prompt": "You are a skilled writing specialist. Generate clear, well-structured, and engaging content. Focus on accuracy, clarity, and appropriate tone for the audience. Revise and polish until the writing is publication-ready.",
-      "tools": { "task": false, "delegate": false },
+      "tools": { "task": false, "delegate": false, "delegate_batch": false },
       "permission": { "edit": "allow", "bash": "deny", "webfetch": "allow", "doom_loop": "deny", "external_directory": "deny" }
     },
     "analyst": {
-      "model": "dmx/deepseek-v4-flash",
+      "model": "opencode-go/deepseek-v4-flash",
       "mode": "subagent",
       "description": "Data and experiment analysis specialist - analyzes experiment results, metrics, logs, and research data",
       "prompt": "You are an analysis specialist. Your job is to read and interpret experiment data, metrics, logs, and research results. You identify trends, anomalies, correlations, and actionable insights. You present findings clearly with quantitative evidence. You do NOT write code or modify files — you analyze what already exists.",
-      "tools": { "task": false, "delegate": false },
+      "tools": { "task": false, "delegate": false, "delegate_batch": false },
       "permission": { "edit": "deny", "bash": "deny", "webfetch": "allow", "doom_loop": "deny", "external_directory": "deny" }
     },
     "vision": {
@@ -130,8 +139,16 @@
       "mode": "subagent",
       "description": "Visual analysis specialist - analyzes images and screenshots",
       "prompt": "You are a visual analysis specialist. Analyze images, screenshots, and visual content in detail. Describe what you see, identify elements, and provide insights.",
-      "tools": { "task": false, "delegate": false },
+      "tools": { "task": false, "delegate": false, "delegate_batch": false },
       "permission": { "edit": "deny", "bash": "deny", "webfetch": "deny", "doom_loop": "deny", "external_directory": "deny" }
+    },
+    "explore": {
+      "model": "opencode-go/deepseek-v4-flash",
+      "mode": "subagent",
+      "description": "Codebase exploration specialist - searches files, reads code, researches APIs, and understands project structures",
+      "prompt": "You are an exploration specialist with HIGH reasoning effort (高推理/深度思考). Your job is to explore codebases, find relevant files, read and understand code, research APIs and libraries, and map out project structures. You have glob, grep, read, and webfetch to search and research. You do NOT write code or make changes — you explore and report back. Always provide clear file paths and relevant code snippets in your findings. Approach every task with thorough analysis.",
+      "tools": { "task": false, "delegate": false, "delegate_batch": false },
+      "permission": { "edit": "deny", "bash": "deny", "webfetch": "allow", "doom_loop": "deny", "external_directory": "deny" }
     }
   }
 }
