@@ -12568,7 +12568,7 @@ Re-read the file and retry.`;
 }
 function readWithHash(filePath) {
   try {
-    const content = readFileSync2(filePath, "utf-8");
+    const content = readFileSync2(filePath, "utf-8").replace(/\r\n/g, "\n");
     return annotateWithHash(content);
   } catch (err) {
     return `Error reading file: ${err instanceof Error ? err.message : String(err)}`;

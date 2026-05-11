@@ -66,7 +66,7 @@ export function applyHashlineEdits(input: HashlineEditInput): ToolResult {
 
 export function readWithHash(filePath: string): ToolResult {
   try {
-    const content = readFileSync(filePath, "utf-8")
+    const content = readFileSync(filePath, "utf-8").replace(/\r\n/g, "\n")
     return annotateWithHash(content)
   } catch (err) {
     return `Error reading file: ${err instanceof Error ? err.message : String(err)}`

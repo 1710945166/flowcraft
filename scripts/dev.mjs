@@ -5,10 +5,11 @@ import { execSync } from "node:child_process"
 import { copyFileSync, existsSync, watch as fsWatch } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
+import { homedir } from "node:os"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, "..")
-const home = process.env.USERPROFILE
+const home = process.env.USERPROFILE || homedir()
 const deployPath = join(home, ".config/opencode/plugins/flowcraft.js")
 
 function build() {
