@@ -285,16 +285,16 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
         const extraPromptSection = orch?.extraPrompt
           ? `\n${orch.extraPrompt}\n`
           : ""
-        output.system.push(`## Delegation System — YOU MUST USE THIS
+        output.system.push(`## Delegation System — USE THIS
 
-HOW TO DELEGATE — use the delegate tool:
+HOW TO DELEGATE — PREFER the built-in \`task\` tool (it shows a sub-window with progress):
+  task(prompt: "detailed task description", description: "short label", subagent_type: "agent-name")
+Example: task(prompt: "Calculate RMSE from pred.npy and true.npy", description: "evaluate model", subagent_type: "coder")
+
+If \`task\` is NOT available (e.g., on some Windows versions), use \`delegate\` as fallback:
   delegate(agent: "agent-name", task: "detailed task description")
-Example: delegate(agent: "coder", task: "Calculate RMSE from pred.npy and true.npy")
 
-NOTE: The built-in \`task\` tool provides a sub-window showing sub-agent progress.
-If \`task\` is available in your tool list, PREFER using it:
-  task(prompt: "task description", description: "label", subagent_type: "agent-name")
-If \`task\` is not available, use \`delegate\` instead.
+
 
 Agent mapping (MEMORIZE THIS):
   Any coding/debug/refactor/test → coder
