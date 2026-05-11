@@ -17,23 +17,24 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           echo "Extracting notes for $TAG"
-          python3 -c "
-import re,sys
-tag = '$TAG'
-with open('RELEASE_NOTES.md','r') as f:
-    content = f.read()
-# Match section starting with # <tag>
-pattern = r'^# ' + re.escape(tag) + r'.*?$((?:.|\n)*?)(?=^# |\Z)'
-match = re.search(pattern, content, re.MULTILINE)
-if match:
-    notes = match.group(1).strip()
-    with open('release_body.md','w') as out:
-        out.write(notes)
-    print('Found release notes for', tag)
-else:
-    print('No release notes found for', tag, file=sys.stderr)
-    sys.exit(1)
-"
+          python3 << 'PYEOF'
+          import re, sys
+          tag = open('/dev/stdin').readline().strip() if False else __import__('os').environ.get('GITHUB_REF','').replace('refs/tags/','')
+          import os
+          tag = os.environ.get('GITHUB_REF_NAME', os.environ.get('GITHUB_REF','').replace('refs/tags/',''))
+          with open('RELEASE_NOTES.md','r') as f:
+              content = f.read()
+          pattern = r'^# ' + re.escape(tag) + r'.*?$((?:.|\n)*?)(?=^# |\Z)'
+          match = re.search(pattern, content, re.MULTILINE)
+          if match:
+              notes = match.group(1).strip()
+              with open('release_body.md','w') as out:
+                  out.write(notes)
+              print('Found release notes for', tag)
+          else:
+              print('No release notes found for', tag, file=sys.stderr)
+              sys.exit(1)
+          PYEOF
       
       - name: Create Release
         uses: softprops/action-gh-release@v2
