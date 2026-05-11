@@ -55,7 +55,7 @@ export class WorktreeManager {
       const dstDir = join(worktreePath, dir)
       if (existsSync(srcDir) && !existsSync(dstDir)) {
         try {
-          symlinkSync(srcDir, dstDir, "junction")
+        symlinkSync(srcDir, dstDir, process.platform === "win32" ? "junction" : "dir")
         } catch {
           if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true })
         }

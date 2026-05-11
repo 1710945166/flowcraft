@@ -12662,7 +12662,7 @@ var WorktreeManager = class {
       const dstDir = join2(worktreePath, dir);
       if (existsSync2(srcDir) && !existsSync2(dstDir)) {
         try {
-          symlinkSync(srcDir, dstDir, "junction");
+          symlinkSync(srcDir, dstDir, process.platform === "win32" ? "junction" : "dir");
         } catch {
           if (!existsSync2(dstDir)) mkdirSync(dstDir, { recursive: true });
         }
