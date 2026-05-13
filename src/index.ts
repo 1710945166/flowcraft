@@ -1,35 +1,37 @@
 import type { Plugin, ToolResult } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
-import { loadConfig, loadProjectConfig, readOpencodeAgents } from "./config.js"
+import { loadConfig, loadProjectConfig, readOpencodeAgents, loadDMXKey } from "./config.js"
 import { applyHashlineEdits, readWithHash, createHashlineSystemPrompt, type HashlineEditInput } from "./hashline.js"
 import { createTodoEnforcer } from "./todo-enforcer.js"
 import { dispatchToAgent, dispatchBatch } from "./orchestrator.js"
 import { SkillStore } from "./skills.js"
+import { BrainstormEngine } from "./brainstorm.js"
 import type { UserMessage } from "@opencode-ai/sdk"
-import { readFileSync, existsSync } from "node:fs"
-import { join } from "node:path"
-import { homedir } from "node:os"
+import { readFileSync } from "node:fs"
+
+
+
 
 let currentSessionID = ""
 let currentToolName = ""
 const skillStore = new SkillStore({ projectRoot: process.cwd() })
 
-function loadDMXKey(): string | null {
-  const candidates = [
-    join(process.cwd(), ".opencode", "opencode.jsonc"),
-    join(homedir(), ".config", "opencode", "opencode.jsonc"),
-  ]
-  for (const p of candidates) {
-    if (!existsSync(p)) continue
-    try {
-      const raw = readFileSync(p, "utf-8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
-      const config = JSON.parse(raw)
-      const key = config?.provider?.dmx?.options?.apiKey
-      if (key) return key
-    } catch { /* next */ }
-  }
-  return null
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 export const flowcraft: Plugin = async ({ client, directory }, options) => {
   const config = loadConfig(directory, options)
@@ -38,6 +40,7 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
   const projectConfig = loadProjectConfig()
 
   const agents = readOpencodeAgents()
+  const brainstormEngine = new BrainstormEngine(client)
   const agentList = agents.map(a => `  - ${a.name}: ${a.description}`).join("\n")
   const agentUsageTips = agents.map(a => `  - Delegate to "${a.name}" for ${a.description}`).join("\n")
   const agentNames = agents.map(a => a.name).join(", ") || "none configured"
@@ -241,6 +244,17 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
           return skills.map(s =>
             `  ${s.runAs === "subagent" ? "🧬" : "📄"} ${s.name}${s.model ? ` (${s.model})` : ""}\n     ${s.description}`
           ).join("\n")
+        },
+      }),
+
+      brainstorm: tool({
+        description: "Run a multi-perspective brainstorming session. Dispatches the topic to planner/analyst/coder/reviewer in parallel, then synthesizes a comprehensive report via LLM.",
+        args: {
+          topic: tool.schema.string().describe("Brainstorm topic to explore from multiple perspectives"),
+          perspectives: tool.schema.array(tool.schema.string()).optional().describe("Perspective agent names (default: planner, analyst, coder, reviewer)"),
+        },
+        async execute(args: { topic: string; perspectives?: string[] }): Promise<ToolResult> {
+          return brainstormEngine.brainstorm(args.topic, args.perspectives, currentSessionID)
         },
       }),
     },

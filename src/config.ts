@@ -117,3 +117,22 @@ export function readOpencodeAgents(): AgentInfo[] {
   return result.length > 0 ? result : DEFAULT_AGENTS
 
 }
+
+export function loadDMXKey(): string | null {
+  const candidates = [
+    join(process.cwd(), ".opencode", "opencode.jsonc"),
+    join(homedir(), ".config", "opencode", "opencode.jsonc"),
+  ]
+  for (const p of candidates) {
+    if (!existsSync(p)) continue
+    try {
+      const raw = readFileSync(p, "utf-8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "")
+      const config = JSON.parse(raw)
+      const key = config?.provider?.dmx?.options?.apiKey
+      if (key) return key
+    } catch { /* next */ }
+  }
+  return null
+}
