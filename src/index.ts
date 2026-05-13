@@ -254,6 +254,14 @@ export const flowcraft: Plugin = async ({ client, directory }, options) => {
           perspectives: tool.schema.array(tool.schema.string()).optional().describe("Perspective agent names (default: planner, analyst, coder, reviewer)"),
         },
         async execute(args: { topic: string; perspectives?: string[] }): Promise<ToolResult> {
+          // ★ 检查调用者身份
+          try {
+            const session = await client.session.get({ path: { id: currentSessionID } })
+            const sessionAgent = (session?.data as any)?.agent
+            if (sessionAgent && sessionAgent !== "orchestrator") {
+              return `Error: brainstorm is not available from sub-agent "${sessionAgent}". Only the orchestrator can brainstorm.`
+            }
+          } catch { /* fall through */ }
           return brainstormEngine.brainstorm(args.topic, args.perspectives, currentSessionID)
         },
       }),

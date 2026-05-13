@@ -83,6 +83,9 @@ export class BrainstormEngine {
     if (!topic || topic.trim().length === 0) {
       return "Error: Brainstorm topic cannot be empty."
     }
+    if (!sessionID || sessionID.trim().length === 0) {
+      return "Error: No active session. Brainstorm requires an active session."
+    }
 
     const selected = perspectives && perspectives.length > 0 ? perspectives : this.defaultPerspectives
 
@@ -139,8 +142,14 @@ export class BrainstormEngine {
     const successfulEntries = [...results.entries()].filter(([_, r]) => r.success)
     if (successfulEntries.length === 0) return null
 
+    const MAX_PERSPECTIVE_LENGTH = 4000
     const sections = successfulEntries
-      .map(([name, r]) => `=== ${name} 视角 ===\n${r.output}`)
+      .map(([name, r]) => {
+        const truncated = r.output.length > MAX_PERSPECTIVE_LENGTH
+          ? r.output.slice(0, MAX_PERSPECTIVE_LENGTH) + "\n[...以下内容已截断]"
+          : r.output
+        return `=== ${name} 视角 ===\n${truncated}`
+      })
       .join("\n\n")
 
     const synthesisPrompt = `你是一位资深的综合分析专家。下面是一个主题的多视角分析结果。
